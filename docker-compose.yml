@@ -1,0 +1,35 @@
+services:
+  backend:
+    build: ./backend
+    container_name: homelarder-backend
+    restart: unless-stopped
+    volumes:
+      # Option A (default): Docker-managed named volume.
+      # Data lives inside Docker's storage area — not directly browsable in
+      # Finder/Explorer, but safe and portable. Use the backup feature in the
+      # app to export your data, or the commands in README.md to access files.
+      - homelarder-data:/data
+
+      # Option B: Bind mount to a folder on your host machine.
+      # Uncomment the line below and comment out the named volume line above.
+      # The folder will be created automatically if it doesn't exist.
+      # On Linux/macOS: ./data:/data
+      # On Windows:     ./data:/data
+      # - ./data:/data
+
+    environment:
+      - PORT=3001
+      - DATA_DIR=/data
+      - DB_NAME=larder.db   # optional: rename the database file (default: larder.db)
+
+  frontend:
+    build: ./frontend
+    container_name: homelarder-frontend
+    restart: unless-stopped
+    ports:
+      - "4580:80"
+    depends_on:
+      - backend
+
+volumes:
+  homelarder-data:

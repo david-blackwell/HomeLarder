@@ -1,0 +1,89 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #faf7f2;
+  --bg-card: #ffffff;
+  --bg-subtle: #f3efe8;
+  --bg-hover: #ede8e0;
+  --border: #e8e0d4;
+  --border-strong: #d4c9b8;
+  --text: #1c1712;
+  --text-muted: #7a6f62;
+  --text-light: #a89e92;
+  --accent: #c85a2a;
+  --accent-hover: #a84820;
+  --accent-light: #fdf0ea;
+  --green: #2d7a4a;
+  --green-light: #eaf5ee;
+  --red-bg: #fee2e2;
+  --red-text: #dc2626;
+  --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.05);
+  --shadow-lg: 0 4px 24px rgba(0,0,0,0.12);
+  --shadow-hover: 0 4px 20px rgba(0,0,0,0.10);
+  --overlay: rgba(28,23,18,0.55);
+  --header-bg: #1c1712;
+  --header-text: #faf7f2;
+  --header-muted: #a89e92;
+  --header-border: #3d3428;
+  --header-btn: #c4b9aa;
+}
+
+[data-theme="dark"] {
+  --bg: #141210;
+  --bg-card: #1e1a17;
+  --bg-subtle: #252019;
+  --bg-hover: #2d2720;
+  --border: #3a3028;
+  --border-strong: #4a3e32;
+  --text: #f0ebe4;
+  --text-muted: #9e9080;
+  --text-light: #6e6050;
+  --accent: #e07040;
+  --accent-hover: #c85a2a;
+  --accent-light: #2a1a10;
+  --green: #4aba70;
+  --green-light: #0e2018;
+  --red-bg: #2a1010;
+  --red-text: #f87171;
+  --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 12px rgba(0,0,0,0.2);
+  --shadow-lg: 0 4px 24px rgba(0,0,0,0.4);
+  --shadow-hover: 0 4px 20px rgba(0,0,0,0.35);
+  --overlay: rgba(0,0,0,0.7);
+  --header-bg: #0e0c0a;
+  --header-text: #f0ebe4;
+  --header-muted: #7a6f62;
+  --header-border: #2a2218;
+  --header-btn: #9e9080;
+}
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  font-size: 15px;
+  line-height: 1.5;
+  transition: background 0.2s, color 0.2s;
+}
+
+button { font-family: inherit; cursor: pointer; border: none; background: none; }
+input, select, textarea { font-family: inherit; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.fade-in { animation: fadeIn 0.22s ease forwards; }
+
+/* ── Mobile-first responsive utilities ── */
+@media (max-width: 600px) {
+  .hide-mobile { display: none !important; }
+  .mobile-full { width: 100% !important; }
+}
+@media (min-width: 601px) {
+  .hide-desktop { display: none !important; }
+}
