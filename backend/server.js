@@ -49,6 +49,7 @@ db.exec(`
     item_id INTEGER NOT NULL,
     description TEXT NOT NULL,
     quantity TEXT,
+    quantity_num REAL,
     date_added TEXT NOT NULL,
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
@@ -81,6 +82,14 @@ db.exec(`
     ('Spice Rack', '🌿', '#10b981', 3),
     ('Fruit Bowl', '🍎', '#f59e0b', 4);
 `);
+
+// Migrate: add quantity_num column to sub_entries if missing
+try {
+  const seCols = db.prepare("PRAGMA table_info(sub_entries)").all().map(c => c.name);
+  if (!seCols.includes('quantity_num')) {
+    db.exec('ALTER TABLE sub_entries ADD COLUMN quantity_num REAL');
+  }
+} catch (e) { /* already exists */ }
 
 // Migrate old text-based location column if upgrading from v1
 try {
@@ -241,7 +250,13 @@ app.get('/api/items', (req, res) => {
     query += ' AND i.location_id = ?'; params.push(location_id);
   }
   if (category_id) { query += ' AND i.category_id = ?'; params.push(category_id); }
-  if (search) { query += ' AND i.name LIKE ?'; params.push(`%${search}%`); }
+  if (search) {
+    query += ` AND (i.name LIKE ? OR EXISTS (
+      SELECT 1 FROM sub_entries se2
+      WHERE se2.item_id = i.id AND se2.description LIKE ?
+    ))`;
+    params.push(`%${search}%`, `%${search}%`);
+  }
   query += ' GROUP BY i.id ORDER BY i.name ASC';
   res.json(db.prepare(query).all(...params));
 });
@@ -294,16 +309,16 @@ app.get('/api/items/:id/sub-entries', (req, res) => {
 });
 
 app.post('/api/items/:id/sub-entries', (req, res) => {
-  const { description, quantity, date_added } = req.body;
-  const result = db.prepare('INSERT INTO sub_entries (item_id, description, quantity, date_added) VALUES (?, ?, ?, ?)').run(
-    req.params.id, description, quantity || '', date_added || new Date().toISOString().split('T')[0]
+  const { description, quantity, quantity_num, date_added } = req.body;
+  const result = db.prepare('INSERT INTO sub_entries (item_id, description, quantity, quantity_num, date_added) VALUES (?, ?, ?, ?, ?)').run(
+    req.params.id, description, quantity || '', quantity_num != null ? parseFloat(quantity_num) : null, date_added || new Date().toISOString().split('T')[0]
   );
   res.json(db.prepare('SELECT * FROM sub_entries WHERE id = ?').get(result.lastInsertRowid));
 });
 
 app.put('/api/sub-entries/:id', (req, res) => {
-  const { description, quantity, date_added } = req.body;
-  db.prepare('UPDATE sub_entries SET description=?, quantity=?, date_added=? WHERE id=?').run(description, quantity || '', date_added, req.params.id);
+  const { description, quantity, quantity_num, date_added } = req.body;
+  db.prepare('UPDATE sub_entries SET description=?, quantity=?, quantity_num=?, date_added=? WHERE id=?').run(description, quantity || '', quantity_num != null ? parseFloat(quantity_num) : null, date_added, req.params.id);
   res.json(db.prepare('SELECT * FROM sub_entries WHERE id = ?').get(req.params.id));
 });
 
@@ -321,6 +336,11 @@ app.get('/api/stats', (req, res) => {
       SELECT l.id, l.name, l.icon, l.color, COUNT(i.id) as count
       FROM locations l LEFT JOIN items i ON i.location_id = l.id
       GROUP BY l.id ORDER BY l.sort_order ASC
+    `).all(),
+    by_category: db.prepare(`
+      SELECT c.id, c.name, c.icon, c.color, COUNT(i.id) as count
+      FROM categories c LEFT JOIN items i ON i.category_id = c.id
+      GROUP BY c.id ORDER BY c.name ASC
     `).all(),
     unassigned_count: db.prepare('SELECT COUNT(*) as c FROM items WHERE location_id IS NULL').get().c,
   });
@@ -368,8 +388,8 @@ app.post('/api/restore', (req, res) => {
       for (const c of (backup.categories || [])) insCat.run(c.id,c.name,c.icon,c.color,c.created_at);
       const insItem = db.prepare('INSERT INTO items (id,name,category_id,location_id,notes,date_added,created_at) VALUES (?,?,?,?,?,?,?)');
       for (const i of (backup.items || [])) insItem.run(i.id,i.name,i.category_id,i.location_id,i.notes,i.date_added,i.created_at);
-      const insSub = db.prepare('INSERT INTO sub_entries (id,item_id,description,quantity,date_added,created_at) VALUES (?,?,?,?,?,?)');
-      for (const s of (backup.sub_entries || [])) insSub.run(s.id,s.item_id,s.description,s.quantity,s.date_added,s.created_at);
+      const insSub = db.prepare('INSERT INTO sub_entries (id,item_id,description,quantity,quantity_num,date_added,created_at) VALUES (?,?,?,?,?,?,?)');
+      for (const s of (backup.sub_entries || [])) insSub.run(s.id,s.item_id,s.description,s.quantity,s.quantity_num??null,s.date_added,s.created_at);
       const insPreset = db.prepare('INSERT INTO tab_presets (id,name,tabs,is_default,created_at) VALUES (?,?,?,?,?)');
       for (const p of (backup.tab_presets || [])) insPreset.run(p.id,p.name,p.tabs,p.is_default,p.created_at);
     })();

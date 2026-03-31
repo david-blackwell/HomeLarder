@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import ReactDOM from 'react-dom';
 
 const API = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
 
@@ -46,6 +47,120 @@ function Field({ label, children, hint, half }) {
       {hint && <p style={{ fontSize: 11, color: 'var(--text-light)', marginTop: 3 }}>{hint}</p>}
     </div>
   );
+}
+
+// ── QuantityInput — numeric stepper + free text label, both optional ────────
+// Stores two values: quantityNum (number|null) and quantityText (string)
+// Displayed together as e.g. "3 bags" or just "500ml" or just "3"
+function QuantityInput({ quantityNum, quantityText, onChangeNum, onChangeText, small }) {
+  const sz = small ? { padding: '7px 10px', fontSize: 13 } : {};
+  const numVal = quantityNum != null ? quantityNum : '';
+
+  return (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
+      {/* Numeric stepper */}
+      <div style={{ display: 'flex', border: '1.5px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: 'var(--bg)', transition: 'border-color 0.15s', flexShrink: 0 }}
+        onFocusCapture={e => e.currentTarget.style.borderColor = 'var(--accent)'}
+        onBlurCapture={e => e.currentTarget.style.borderColor = 'var(--border)'}>
+        <button type="button"
+          onClick={() => {
+            const n = parseFloat(numVal);
+            onChangeNum(isNaN(n) || n <= 1 ? null : n - 1);
+          }}
+          style={{ padding: small ? '0 8px' : '0 10px', fontSize: 16, color: 'var(--text-muted)', background: 'var(--bg-subtle)', borderRight: '1px solid var(--border)', flexShrink: 0 }}>−</button>
+        <input
+          type="number"
+          min="0"
+          step="1"
+          value={numVal}
+          placeholder="qty"
+          onChange={e => onChangeNum(e.target.value === '' ? null : parseFloat(e.target.value))}
+          style={{ width: small ? 44 : 52, border: 'none', outline: 'none', background: 'transparent', color: 'var(--text)', textAlign: 'center', fontFamily: 'inherit', fontWeight: 600, minWidth: 0, ...sz, fontSize: small ? 13 : 14 }}
+        />
+        <button type="button"
+          onClick={() => {
+            const n = parseFloat(numVal);
+            onChangeNum(isNaN(n) ? 1 : n + 1);
+          }}
+          style={{ padding: small ? '0 8px' : '0 10px', fontSize: 16, color: 'var(--text-muted)', background: 'var(--bg-subtle)', borderLeft: '1px solid var(--border)', flexShrink: 0 }}>+</button>
+      </div>
+      {/* Free text label */}
+      <input
+        type="text"
+        value={quantityText}
+        onChange={e => onChangeText(e.target.value)}
+        placeholder="unit / note"
+        style={{ ...IS.base, ...sz, flex: 1, minWidth: 0 }}
+        onFocus={focusInput} onBlur={blurInput}
+      />
+    </div>
+  );
+}
+
+// Helper: format quantity for display
+function fmtQty(num, text) {
+  if (num != null && text) return `${num} ${text}`;
+  if (num != null) return String(num);
+  if (text) return text;
+  return null;
+}
+
+// ── ConfirmDialog ─────────────────────────────────────────────────────────
+// A small in-app confirmation dialog — replaces window.confirm everywhere.
+// Usage: <ConfirmDialog message="..." onConfirm={fn} onCancel={fn} confirmLabel="Delete" danger />
+function ConfirmDialog({ message, detail, onConfirm, onCancel, confirmLabel = 'Confirm', danger = true }) {
+  useEffect(() => {
+    const h = e => { if (e.key === 'Escape') onCancel(); };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, [onCancel]);
+
+  return ReactDOM.createPortal(
+    <div onClick={onCancel}
+      style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', backdropFilter: 'blur(3px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ background: 'var(--bg-card)', borderRadius: 14, boxShadow: 'var(--shadow-lg)', width: '100%', maxWidth: 380, padding: '24px 24px 20px', border: `1px solid ${danger ? 'var(--red-text)' : 'var(--border)'}`, animation: 'fadeIn 0.15s ease' }}>
+        <div style={{ fontSize: 28, marginBottom: 10, textAlign: 'center' }}>{danger ? '🗑️' : '❓'}</div>
+        <p style={{ fontWeight: 600, fontSize: 15, textAlign: 'center', marginBottom: detail ? 6 : 18, lineHeight: 1.4 }}>{message}</p>
+        {detail && <p style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', marginBottom: 18, lineHeight: 1.5 }}>{detail}</p>}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onCancel}
+            style={{ flex: 1, padding: '10px', borderRadius: 9, border: '1.5px solid var(--border)', color: 'var(--text-muted)', background: 'var(--bg-subtle)', fontWeight: 500, fontSize: 14 }}>
+            Cancel
+          </button>
+          <button onClick={onConfirm} autoFocus
+            style={{ flex: 1, padding: '10px', borderRadius: 9, background: danger ? 'var(--red-text)' : 'var(--accent)', color: '#fff', fontWeight: 600, fontSize: 14, border: 'none' }}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// A hook to imperatively trigger a ConfirmDialog and await the result.
+// Returns [confirmFn, dialogElement]
+// Usage: const [confirm, ConfirmUI] = useConfirm();
+//        const yes = await confirm({ message: '...' });
+function useConfirm() {
+  const [state, setState] = useState(null); // {message, detail, confirmLabel, danger, resolve}
+  const confirm = useCallback((opts) => new Promise(resolve => {
+    setState({ ...opts, resolve });
+  }), []);
+  const handleConfirm = () => { state.resolve(true); setState(null); };
+  const handleCancel = () => { state.resolve(false); setState(null); };
+  const dialog = state ? (
+    <ConfirmDialog
+      message={state.message}
+      detail={state.detail}
+      confirmLabel={state.confirmLabel || 'Confirm'}
+      danger={state.danger !== false}
+      onConfirm={handleConfirm}
+      onCancel={handleCancel}
+    />
+  ) : null;
+  return [confirm, dialog];
 }
 
 // ── Modal — full-screen on mobile ─────────────────────────────────────────
@@ -146,7 +261,8 @@ function AddItemModal({ categories, locations, onClose, onSaved, prefillItem, de
   const [mode, setMode] = useState('new');
   const [targetItem, setTargetItem] = useState(null);
   const [subDesc, setSubDesc] = useState('');
-  const [subQty, setSubQty] = useState('');
+  const [subQtyNum, setSubQtyNum] = useState(null);
+  const [subQtyText, setSubQtyText] = useState('');
   const searchTimer = useRef(null);
 
   useEffect(() => { if (prefillItem) { setTargetItem(prefillItem); setMode('sub-entry'); } }, [prefillItem]);
@@ -165,7 +281,7 @@ function AddItemModal({ categories, locations, onClose, onSaved, prefillItem, de
     try {
       if (mode === 'sub-entry' && targetItem) {
         if (!subDesc.trim()) { setError('Description is required'); setSaving(false); return; }
-        await api(`/api/items/${targetItem.id}/sub-entries`, { method: 'POST', body: { description: subDesc, quantity: subQty, date_added: dateAdded } });
+        await api(`/api/items/${targetItem.id}/sub-entries`, { method: 'POST', body: { description: subDesc, quantity: subQtyText, quantity_num: subQtyNum, date_added: dateAdded } });
       } else {
         if (!name.trim()) { setError('Name is required'); setSaving(false); return; }
         await api('/api/items', { method: 'POST', body: { name: name.trim(), category_id: categoryId || null, location_id: locationId || null, notes, date_added: dateAdded } });
@@ -191,7 +307,7 @@ function AddItemModal({ categories, locations, onClose, onSaved, prefillItem, de
             <input style={inputStyle} value={subDesc} onChange={e => setSubDesc(e.target.value)} placeholder="e.g. breast 250g" autoFocus onFocus={focusInput} onBlur={blurInput} />
           </Field>
           <Field label="Quantity (optional)">
-            <input style={inputStyle} value={subQty} onChange={e => setSubQty(e.target.value)} placeholder="e.g. 2 bags, 500ml" onFocus={focusInput} onBlur={blurInput} />
+            <QuantityInput quantityNum={subQtyNum} quantityText={subQtyText} onChangeNum={setSubQtyNum} onChangeText={setSubQtyText} />
           </Field>
         </>
       ) : (
@@ -289,25 +405,55 @@ function EditItemModal({ item, categories, locations, onClose, onSaved }) {
 }
 
 // ── SubEntryRow ───────────────────────────────────────────────────────────
-function SubEntryRow({ entry, onDelete, onUpdate, compact }) {
+// onStepNum(entry, newNum) — called when +/- tapped inline; parent decides if delete needed
+function SubEntryRow({ entry, onDelete, onUpdate, onStepNum, compact }) {
   const [editing, setEditing] = useState(false);
   const [desc, setDesc] = useState(entry.description);
-  const [qty, setQty] = useState(entry.quantity || '');
+  const [qtyNum, setQtyNum] = useState(entry.quantity_num ?? null);
+  const [qtyText, setQtyText] = useState(entry.quantity || '');
   const [date, setDate] = useState(entry.date_added);
   const [saving, setSaving] = useState(false);
 
+  // Keep local state in sync if entry prop changes (e.g. after a step save)
+  useEffect(() => {
+    setQtyNum(entry.quantity_num ?? null);
+    setQtyText(entry.quantity || '');
+    setDesc(entry.description);
+    setDate(entry.date_added);
+  }, [entry.quantity_num, entry.quantity, entry.description, entry.date_added]);
+
   const handleSave = async () => {
     setSaving(true);
-    await onUpdate(entry.id, { description: desc, quantity: qty, date_added: date });
+    await onUpdate(entry.id, { description: desc, quantity: qtyText, quantity_num: qtyNum, date_added: date });
     setEditing(false); setSaving(false);
   };
+
+  const handleStep = delta => {
+    const current = entry.quantity_num ?? 0;
+    const next = Math.max(0, current + delta);
+    onStepNum(entry, next);
+  };
+
+  // Inline stepper — only shown when entry has a numeric quantity
+  const hasNum = entry.quantity_num != null;
+  const InlineStepper = hasNum ? (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 0, border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden', flexShrink: 0 }}>
+      <button onClick={() => handleStep(-1)}
+        style={{ padding: compact ? '1px 7px' : '2px 8px', fontSize: 15, color: 'var(--text-muted)', background: 'var(--bg-subtle)', borderRight: '1px solid var(--border)', lineHeight: 1 }}>−</button>
+      <span style={{ padding: compact ? '1px 7px' : '2px 8px', fontSize: compact ? 12 : 13, fontWeight: 600, minWidth: 24, textAlign: 'center', background: 'var(--bg)' }}>
+        {entry.quantity_num}
+      </span>
+      <button onClick={() => handleStep(1)}
+        style={{ padding: compact ? '1px 7px' : '2px 8px', fontSize: 15, color: 'var(--text-muted)', background: 'var(--bg-subtle)', borderLeft: '1px solid var(--border)', lineHeight: 1 }}>+</button>
+    </div>
+  ) : null;
 
   if (editing) {
     return (
       <div style={{ padding: '8px 10px', background: 'var(--bg)', borderRadius: 8, marginBottom: 6, border: '1.5px solid var(--accent)' }}>
         <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
           <input style={{ ...inputStyle, ...IS.sm, flex: 2 }} value={desc} onChange={e => setDesc(e.target.value)} onFocus={focusInput} onBlur={blurInput} />
-          <input style={{ ...inputStyle, ...IS.sm, flex: 1 }} value={qty} onChange={e => setQty(e.target.value)} placeholder="Qty" onFocus={focusInput} onBlur={blurInput} />
+          <QuantityInput quantityNum={qtyNum} quantityText={qtyText} onChangeNum={setQtyNum} onChangeText={setQtyText} small />
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <input type="date" style={{ ...inputStyle, ...IS.sm, flex: 1 }} value={date} onChange={e => setDate(e.target.value)} />
@@ -323,7 +469,13 @@ function SubEntryRow({ entry, onDelete, onUpdate, compact }) {
       <tr>
         <td style={{ padding: '5px 8px 5px 16px', fontSize: 13, color: 'var(--text-muted)', width: 16 }}>↳</td>
         <td style={{ padding: '5px 8px', fontSize: 14, fontWeight: 500 }}>{entry.description}</td>
-        <td style={{ padding: '5px 8px', fontSize: 13, color: 'var(--text-muted)', maxWidth: 100 }}>{entry.quantity || '—'}</td>
+        <td style={{ padding: '4px 8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {InlineStepper}
+            {entry.quantity && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{entry.quantity}</span>}
+            {!hasNum && !entry.quantity && <span style={{ fontSize: 12, color: 'var(--text-light)' }}>—</span>}
+          </div>
+        </td>
         <td style={{ padding: '5px 8px', fontSize: 12, color: 'var(--text-light)', whiteSpace: 'nowrap' }}>{entry.date_added}</td>
         <td style={{ padding: '5px 8px 5px 4px', whiteSpace: 'nowrap' }}>
           <button onClick={() => setEditing(true)} style={{ padding: '2px 7px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 11, color: 'var(--text-muted)', marginRight: 4 }}>Edit</button>
@@ -338,8 +490,9 @@ function SubEntryRow({ entry, onDelete, onUpdate, compact }) {
       <span style={{ fontSize: 12, color: 'var(--text-muted)', flexShrink: 0 }}>↳</span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <span style={{ fontWeight: 500, fontSize: 14 }}>{entry.description}</span>
-        {entry.quantity && <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>{entry.quantity}</span>}
+        {entry.quantity && <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 6 }}>{entry.quantity}</span>}
       </div>
+      {InlineStepper}
       <span style={{ fontSize: 11, color: 'var(--text-light)', whiteSpace: 'nowrap', flexShrink: 0 }}>{entry.date_added}</span>
       <button onClick={() => setEditing(true)} style={{ padding: '3px 8px', borderRadius: 5, border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>Edit</button>
       <button onClick={() => onDelete(entry.id)} style={{ padding: '3px 8px', borderRadius: 5, background: 'var(--red-bg)', color: 'var(--red-text)', fontSize: 12, flexShrink: 0 }}>✕</button>
@@ -349,15 +502,16 @@ function SubEntryRow({ entry, onDelete, onUpdate, compact }) {
 
 function AddSubEntryInline({ itemId, onAdded }) {
   const [desc, setDesc] = useState('');
-  const [qty, setQty] = useState('');
+  const [qtyNum, setQtyNum] = useState(null);
+  const [qtyText, setQtyText] = useState('');
   const [date, setDate] = useState(TODAY);
   const [saving, setSaving] = useState(false);
 
   const handleAdd = async () => {
     if (!desc.trim()) return;
     setSaving(true);
-    await api(`/api/items/${itemId}/sub-entries`, { method: 'POST', body: { description: desc, quantity: qty, date_added: date } });
-    setDesc(''); setQty(''); setDate(TODAY);
+    await api(`/api/items/${itemId}/sub-entries`, { method: 'POST', body: { description: desc, quantity: qtyText, quantity_num: qtyNum, date_added: date } });
+    setDesc(''); setQtyNum(null); setQtyText(''); setDate(TODAY);
     onAdded(); setSaving(false);
   };
 
@@ -366,7 +520,7 @@ function AddSubEntryInline({ itemId, onAdded }) {
       <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--green)', marginBottom: 8 }}>+ New sub-entry</div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         <input style={{ ...inputStyle, ...IS.sm, flex: 2 }} value={desc} onChange={e => setDesc(e.target.value)} placeholder="Description" onFocus={e => e.target.style.borderColor = 'var(--green)'} onBlur={blurInput} />
-        <input style={{ ...inputStyle, ...IS.sm, flex: 1 }} value={qty} onChange={e => setQty(e.target.value)} placeholder="Qty" onFocus={e => e.target.style.borderColor = 'var(--green)'} onBlur={blurInput} />
+        <QuantityInput quantityNum={qtyNum} quantityText={qtyText} onChangeNum={setQtyNum} onChangeText={setQtyText} small />
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
         <input type="date" style={{ ...inputStyle, ...IS.sm, flex: 1 }} value={date} onChange={e => setDate(e.target.value)} />
@@ -385,7 +539,7 @@ function ItemCard({ item, categories, locations, onRefresh, onAddSubEntry, alway
   const [loadingSubs, setLoadingSubs] = useState(false);
   const [showAddSub, setShowAddSub] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirm, ConfirmUI] = useConfirm();
 
   const loadSubs = useCallback(async () => {
     setLoadingSubs(true);
@@ -396,14 +550,45 @@ function ItemCard({ item, categories, locations, onRefresh, onAddSubEntry, alway
   const isExpanded = alwaysExpanded || expanded;
   useEffect(() => { if (isExpanded) loadSubs(); }, [isExpanded]); // eslint-disable-line
 
-  const handleDeleteSub = async id => { await api(`/api/sub-entries/${id}`, { method: 'DELETE' }); setSubEntries(s => s.filter(e => e.id !== id)); onRefresh(); };
+  const handleDeleteSub = async id => {
+    await api(`/api/sub-entries/${id}`, { method: 'DELETE' });
+    const remaining = subEntries.filter(e => e.id !== id);
+    setSubEntries(remaining);
+    if (remaining.length === 0) {
+      const yes = await confirm({ message: `Delete "${item.name}"?`, detail: 'All sub-entries have been removed.', confirmLabel: 'Delete item' });
+      if (yes) {
+        await api(`/api/items/${item.id}`, { method: 'DELETE' });
+      }
+      onRefresh();
+    } else {
+      onRefresh();
+    }
+  };
   const handleUpdateSub = async (id, data) => { await api(`/api/sub-entries/${id}`, { method: 'PUT', body: data }); loadSubs(); };
-  const handleDeleteItem = async () => { await api(`/api/items/${item.id}`, { method: 'DELETE' }); onRefresh(); };
+  const handleDeleteItem = async () => {
+    const yes = await confirm({ message: `Delete "${item.name}"?`, detail: 'This will remove the item and all its sub-entries.', confirmLabel: 'Delete' });
+    if (yes) { await api(`/api/items/${item.id}`, { method: 'DELETE' }); onRefresh(); }
+  };
+  const handleStepNum = async (entry, newNum) => {
+    if (newNum === 0) {
+      const yes = await confirm({ message: `Delete "${entry.description}"?`, detail: 'Quantity reached 0.', confirmLabel: 'Delete' });
+      if (yes) {
+        await handleDeleteSub(entry.id);
+      } else {
+        await api(`/api/sub-entries/${entry.id}`, { method: 'PUT', body: { description: entry.description, quantity: entry.quantity, quantity_num: 0, date_added: entry.date_added } });
+        loadSubs();
+      }
+    } else {
+      await api(`/api/sub-entries/${entry.id}`, { method: 'PUT', body: { description: entry.description, quantity: entry.quantity, quantity_num: newNum, date_added: entry.date_added } });
+      loadSubs();
+    }
+  };
   const subCount = item.sub_entry_count;
 
   return (
     <>
       {editing && <EditItemModal item={item} categories={categories} locations={locations} onClose={() => setEditing(false)} onSaved={onRefresh} />}
+      {ConfirmUI}
       <div className="fade-in" style={{ background: 'var(--bg-card)', borderRadius: 12, border: '1px solid var(--border)', boxShadow: 'var(--shadow)', overflow: 'hidden', transition: 'box-shadow 0.15s' }}
         onMouseEnter={e => e.currentTarget.style.boxShadow = 'var(--shadow-hover)'}
         onMouseLeave={e => e.currentTarget.style.boxShadow = 'var(--shadow)'}>
@@ -427,9 +612,7 @@ function ItemCard({ item, categories, locations, onRefresh, onAddSubEntry, alway
           <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             <button onClick={() => onAddSubEntry(item)} style={{ padding: '5px 10px', borderRadius: 6, background: 'var(--green-light)', color: 'var(--green)', fontWeight: 600, fontSize: 12, border: '1px solid var(--green)', whiteSpace: 'nowrap' }}>+ Entry</button>
             <button onClick={() => setEditing(true)} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 12 }}>Edit</button>
-            {confirmDelete
-              ? <button onClick={handleDeleteItem} style={{ padding: '5px 10px', borderRadius: 6, background: 'var(--red-text)', color: '#fff', fontSize: 12 }}>Confirm?</button>
-              : <button onClick={() => setConfirmDelete(true)} onBlur={() => setTimeout(() => setConfirmDelete(false), 200)} style={{ padding: '5px 10px', borderRadius: 6, background: 'var(--red-bg)', color: 'var(--red-text)', fontSize: 12 }}>Delete</button>}
+            <button onClick={handleDeleteItem} style={{ padding: '5px 10px', borderRadius: 6, background: 'var(--red-bg)', color: 'var(--red-text)', fontSize: 12 }}>Delete</button>
             {subCount > 0 && !alwaysExpanded && (
               <button onClick={() => setExpanded(e => !e)} style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--accent)', fontWeight: 500, background: 'var(--accent-light)', padding: '5px 10px', borderRadius: 6 }}>
                 <span style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0)', display: 'inline-block', transition: 'transform 0.2s', fontSize: 9 }}>▶</span>
@@ -444,7 +627,7 @@ function ItemCard({ item, categories, locations, onRefresh, onAddSubEntry, alway
         {isExpanded && (
           <div style={{ borderTop: '1px solid var(--border)', padding: '10px 14px 12px', background: 'var(--bg-subtle)' }}>
             {loadingSubs ? <div style={{ padding: 8 }}><Spinner /></div> : subEntries.map(e => (
-              <SubEntryRow key={e.id} entry={e} onDelete={handleDeleteSub} onUpdate={handleUpdateSub} />
+              <SubEntryRow key={e.id} entry={e} onDelete={handleDeleteSub} onUpdate={handleUpdateSub} onStepNum={handleStepNum} />
             ))}
             {showAddSub
               ? <AddSubEntryInline itemId={item.id} onAdded={() => { loadSubs(); onRefresh(); setShowAddSub(false); }} />
@@ -462,7 +645,6 @@ function ItemRow({ item, categories, locations, onRefresh, onAddSubEntry }) {
   const [loaded, setLoaded] = useState(false);
   const [showAddSub, setShowAddSub] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const load = useCallback(async () => {
     if (loaded) return;
@@ -472,13 +654,45 @@ function ItemRow({ item, categories, locations, onRefresh, onAddSubEntry }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleDeleteSub = async id => { await api(`/api/sub-entries/${id}`, { method: 'DELETE' }); setSubEntries(s => s.filter(e => e.id !== id)); onRefresh(); };
+  const [confirm, ConfirmUI] = useConfirm();
+  const handleDeleteSub = async id => {
+    await api(`/api/sub-entries/${id}`, { method: 'DELETE' });
+    const remaining = subEntries.filter(e => e.id !== id);
+    setSubEntries(remaining);
+    if (remaining.length === 0) {
+      const yes = await confirm({ message: `Delete "${item.name}"?`, detail: 'All sub-entries have been removed.', confirmLabel: 'Delete item' });
+      if (yes) {
+        await api(`/api/items/${item.id}`, { method: 'DELETE' });
+      }
+      onRefresh();
+    } else {
+      onRefresh();
+    }
+  };
   const handleUpdateSub = async (id, data) => { await api(`/api/sub-entries/${id}`, { method: 'PUT', body: data }); const r = await api(`/api/items/${item.id}/sub-entries`); setSubEntries(r); };
-  const handleDeleteItem = async () => { await api(`/api/items/${item.id}`, { method: 'DELETE' }); onRefresh(); };
+  const handleDeleteItem = async () => {
+    const yes = await confirm({ message: `Delete "${item.name}"?`, detail: 'This will remove the item and all its sub-entries.', confirmLabel: 'Delete' });
+    if (yes) { await api(`/api/items/${item.id}`, { method: 'DELETE' }); onRefresh(); }
+  };
+  const handleStepNum = async (entry, newNum) => {
+    if (newNum === 0) {
+      const yes = await confirm({ message: `Delete "${entry.description}"?`, detail: 'Quantity reached 0.', confirmLabel: 'Delete' });
+      if (yes) {
+        await handleDeleteSub(entry.id);
+      } else {
+        await api(`/api/sub-entries/${entry.id}`, { method: 'PUT', body: { description: entry.description, quantity: entry.quantity, quantity_num: 0, date_added: entry.date_added } });
+        const r = await api(`/api/items/${item.id}/sub-entries`); setSubEntries(r);
+      }
+    } else {
+      await api(`/api/sub-entries/${entry.id}`, { method: 'PUT', body: { description: entry.description, quantity: entry.quantity, quantity_num: newNum, date_added: entry.date_added } });
+      const r = await api(`/api/items/${item.id}/sub-entries`); setSubEntries(r);
+    }
+  };
 
   return (
     <>
       {editing && <EditItemModal item={item} categories={categories} locations={locations} onClose={() => setEditing(false)} onSaved={onRefresh} />}
+      {ConfirmUI}
       <div className="fade-in" style={{ background: 'var(--bg-card)', borderRadius: 10, border: '1px solid var(--border)', boxShadow: 'var(--shadow)', overflow: 'hidden', marginBottom: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', flexWrap: 'wrap', borderBottom: (subEntries.length > 0 || showAddSub) ? '1px solid var(--border)' : 'none' }}>
           <span style={{ fontSize: 22, flexShrink: 0 }}>{item.category_icon || '📦'}</span>
@@ -494,9 +708,7 @@ function ItemRow({ item, categories, locations, onRefresh, onAddSubEntry }) {
           <div style={{ display: 'flex', gap: 5, flexShrink: 0, marginLeft: 'auto', flexWrap: 'wrap' }}>
             <button onClick={() => onAddSubEntry(item)} style={{ padding: '4px 9px', borderRadius: 6, background: 'var(--green-light)', color: 'var(--green)', fontWeight: 600, fontSize: 12, border: '1px solid var(--green)', whiteSpace: 'nowrap' }}>+ Entry</button>
             <button onClick={() => setEditing(true)} style={{ padding: '4px 9px', borderRadius: 6, border: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 12 }}>Edit</button>
-            {confirmDelete
-              ? <button onClick={handleDeleteItem} style={{ padding: '4px 9px', borderRadius: 6, background: 'var(--red-text)', color: '#fff', fontSize: 12 }}>Confirm?</button>
-              : <button onClick={() => setConfirmDelete(true)} onBlur={() => setTimeout(() => setConfirmDelete(false), 200)} style={{ padding: '4px 9px', borderRadius: 6, background: 'var(--red-bg)', color: 'var(--red-text)', fontSize: 12 }}>Delete</button>}
+            <button onClick={handleDeleteItem} style={{ padding: '4px 9px', borderRadius: 6, background: 'var(--red-bg)', color: 'var(--red-text)', fontSize: 12 }}>Delete</button>
           </div>
         </div>
         {subEntries.length > 0 && (
@@ -512,7 +724,7 @@ function ItemRow({ item, categories, locations, onRefresh, onAddSubEntry }) {
                 </tr>
               </thead>
               <tbody>
-                {subEntries.map(e => <SubEntryRow key={e.id} entry={e} onDelete={handleDeleteSub} onUpdate={handleUpdateSub} compact />)}
+                {subEntries.map(e => <SubEntryRow key={e.id} entry={e} onDelete={handleDeleteSub} onUpdate={handleUpdateSub} onStepNum={handleStepNum} compact />)}
               </tbody>
             </table>
           </div>
@@ -532,11 +744,20 @@ function ItemRow({ item, categories, locations, onRefresh, onAddSubEntry }) {
 function DraggableTabList({ tabs, locations, categories, onReorder, onRemove }) {
   const dragIdx = useRef(null);
   const [dragOver, setDragOver] = useState(null);
+  const isMobile = useIsMobile();
 
   const resolve = key => {
     if (key.startsWith('loc:')) { const l = locations.find(x => `loc:${x.id}` === key); return l ? { label: l.name, icon: l.icon, color: l.color } : null; }
     if (key.startsWith('cat:')) { const c = categories.find(x => `cat:${x.id}` === key); return c ? { label: c.name, icon: c.icon, color: c.color } : null; }
     return null;
+  };
+
+  const move = (idx, dir) => {
+    const arr = [...tabs];
+    const target = idx + dir;
+    if (target < 0 || target >= arr.length) return;
+    [arr[idx], arr[target]] = [arr[target], arr[idx]];
+    onReorder(arr);
   };
 
   if (tabs.length === 0) return (
@@ -548,14 +769,16 @@ function DraggableTabList({ tabs, locations, categories, onReorder, onRemove }) 
   return (
     <div style={{ marginBottom: 14 }}>
       <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 7 }}>
-        Tab order <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: 'var(--text-light)' }}>— drag to reorder</span>
+        Tab order <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: 'var(--text-light)' }}>
+          {isMobile ? '— tap arrows to reorder' : '— drag to reorder'}
+        </span>
       </div>
       {tabs.map((key, idx) => {
         const info = resolve(key);
         if (!info) return null;
         return (
           <div key={key}
-            draggable
+            draggable={!isMobile}
             onDragStart={() => { dragIdx.current = idx; }}
             onDragOver={e => { e.preventDefault(); setDragOver(idx); }}
             onDrop={e => {
@@ -569,8 +792,16 @@ function DraggableTabList({ tabs, locations, categories, onReorder, onRemove }) 
             }}
             onDragEnd={() => { dragIdx.current = null; setDragOver(null); }}
             onDragLeave={() => setDragOver(null)}
-            style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 11px', borderRadius: 8, border: `1.5px solid ${dragOver === idx ? 'var(--accent)' : 'var(--border)'}`, background: dragOver === idx ? 'var(--accent-light)' : 'var(--bg)', marginBottom: 6, cursor: 'grab', userSelect: 'none', transition: 'border-color 0.1s, background 0.1s' }}>
-            <span style={{ color: 'var(--text-light)', fontSize: 14, flexShrink: 0 }}>⠿</span>
+            style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 11px', borderRadius: 8, border: `1.5px solid ${dragOver === idx ? 'var(--accent)' : 'var(--border)'}`, background: dragOver === idx ? 'var(--accent-light)' : 'var(--bg)', marginBottom: 6, cursor: isMobile ? 'default' : 'grab', userSelect: 'none', transition: 'border-color 0.1s, background 0.1s' }}>
+            {!isMobile && <span style={{ color: 'var(--text-light)', fontSize: 14, flexShrink: 0 }}>⠿</span>}
+            {isMobile && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
+                <button onClick={() => move(idx, -1)} disabled={idx === 0}
+                  style={{ width: 24, height: 22, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-subtle)', color: idx === 0 ? 'var(--text-light)' : 'var(--text-muted)', fontSize: 11, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>▲</button>
+                <button onClick={() => move(idx, 1)} disabled={idx === tabs.length - 1}
+                  style={{ width: 24, height: 22, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-subtle)', color: idx === tabs.length - 1 ? 'var(--text-light)' : 'var(--text-muted)', fontSize: 11, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>▼</button>
+              </div>
+            )}
             <span style={{ fontSize: 16 }}>{info.icon}</span>
             <span style={{ flex: 1, fontWeight: 500, fontSize: 14 }}>{info.label}</span>
             <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: info.color + '22', color: info.color, border: `1px solid ${info.color}35` }}>
@@ -613,8 +844,10 @@ function TabPresetsModal({ locations, categories, presets, onRefresh, onClose, o
     setSaving(false);
   };
 
+  const [confirm, ConfirmUI] = useConfirm();
   const handleDelete = async id => {
-    if (!window.confirm('Delete this preset?')) return;
+    const yes = await confirm({ message: 'Delete this preset?', confirmLabel: 'Delete' });
+    if (!yes) return;
     await api(`/api/tab-presets/${id}`, { method: 'DELETE' });
     await onRefresh();
   };
@@ -706,6 +939,7 @@ function TabPresetsModal({ locations, categories, presets, onRefresh, onClose, o
         </div>
       ))}
       <button onClick={startNew} style={{ width: '100%', marginTop: 8, padding: '11px', borderRadius: 9, background: 'var(--accent)', color: '#fff', fontWeight: 600, fontSize: 14 }}>+ New Preset</button>
+      {ConfirmUI}
     </Modal>
   );
 }
@@ -849,9 +1083,11 @@ function LocationManager({ locations, onRefresh, onClose }) {
     } catch { setError('Name already exists'); }
   };
 
+  const [confirm, ConfirmUI] = useConfirm();
   const handleDelete = async id => {
     const loc = localLocs.find(l => l.id === id);
-    if (!window.confirm(`Delete "${loc?.name}"? Items will become unassigned.`)) return;
+    const yes = await confirm({ message: `Delete "${loc?.name}"?`, detail: 'Items in this location will become unassigned.', confirmLabel: 'Delete' });
+    if (!yes) return;
     await api(`/api/locations/${id}`, { method: 'DELETE' }); onRefresh();
   };
 
@@ -915,6 +1151,18 @@ function CategoryManager({ categories, onRefresh, onClose }) {
   const [color, setColor] = useState('#6366f1');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [catToDelete, setCatToDelete] = useState(null);
+  const [confirm, ConfirmUI] = useConfirm();
+
+  // Handle category delete via confirm dialog
+  useEffect(() => {
+    if (!catToDelete) return;
+    const cat = categories.find(c => c.id === catToDelete);
+    confirm({ message: `Delete "${cat?.name}"?`, detail: 'Items will be uncategorised.', confirmLabel: 'Delete' }).then(yes => {
+      setCatToDelete(null);
+      if (yes) api(`/api/categories/${catToDelete}`, { method: 'DELETE' }).then(onRefresh);
+    });
+  }, [catToDelete]); // eslint-disable-line
 
   const handleAdd = async () => {
     if (!name.trim()) return;
@@ -945,10 +1193,11 @@ function CategoryManager({ categories, onRefresh, onClose }) {
           <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 12px', borderRadius: 9, border: '1.5px solid var(--border)', background: 'var(--bg)' }}>
             <span style={{ fontSize: 20 }}>{c.icon}</span>
             <div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: 14 }}>{c.name}</div><div style={{ width: 28, height: 3, borderRadius: 2, background: c.color, marginTop: 3 }} /></div>
-            <button onClick={async () => { if (!window.confirm('Delete? Items will be uncategorised.')) return; await api(`/api/categories/${c.id}`, { method: 'DELETE' }); onRefresh(); }} style={{ padding: '4px 8px', borderRadius: 5, background: 'var(--red-bg)', color: 'var(--red-text)', fontSize: 12 }}>✕</button>
+            <button onClick={() => setCatToDelete(c.id)} style={{ padding: '4px 8px', borderRadius: 5, background: 'var(--red-bg)', color: 'var(--red-text)', fontSize: 12 }}>✕</button>
           </div>
         ))}
       </div>
+      {ConfirmUI}
     </Modal>
   );
 }
@@ -1066,6 +1315,7 @@ export default function App() {
   const refreshPresets = async () => { const ps = await api('/api/tab-presets'); setPresets(ps); };
 
   const locCounts = stats?.by_location?.reduce((acc, r) => ({ ...acc, [`loc:${r.id}`]: r.count }), {}) || {};
+  const catCounts = stats?.by_category?.reduce((acc, r) => ({ ...acc, [`cat:${r.id}`]: r.count }), {}) || {};
   const unassignedCount = stats?.unassigned_count || 0;
   const totalCount = stats?.total_items || 0;
   const defaultLocId = activeTab?.startsWith('loc:') ? parseInt(activeTab.slice(4)) : null;
@@ -1076,7 +1326,7 @@ export default function App() {
       return { key, label: loc.name, icon: loc.icon, color: loc.color, count: locCounts[key] || 0 };
     } else if (key.startsWith('cat:')) {
       const cat = categories.find(c => `cat:${c.id}` === key); if (!cat) return null;
-      return { key, label: cat.name, icon: cat.icon, color: cat.color, count: null };
+      return { key, label: cat.name, icon: cat.icon, color: cat.color, count: catCounts[key] || 0 };
     }
     return null;
   }).filter(Boolean);
