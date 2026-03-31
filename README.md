@@ -1,4 +1,4 @@
-# 🥘 HomeLarder
+# <img src="docs/screenshots/HomeLarder_Logo_Crop.png" width="30"/> HomeLarder
 
 A fully vibe-coded, self-hosted Docker app to track what's in your fridge, freezer, pantry, and anywhere else you store food.
 
