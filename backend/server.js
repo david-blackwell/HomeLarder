@@ -11,7 +11,7 @@ app.use(express.json());
 const DATA_DIR = process.env.DATA_DIR || '/data';
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-const DB_NAME = process.env.DB_NAME || 'larder.db';
+const DB_NAME = process.env.DB_NAME || 'pantry.db';
 const db = new Database(path.join(DATA_DIR, DB_NAME));
 
 db.exec(`
@@ -38,6 +38,8 @@ db.exec(`
     category_id INTEGER,
     location_id INTEGER,
     notes TEXT,
+    quantity TEXT,
+    quantity_num REAL,
     date_added TEXT NOT NULL,
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL,
@@ -63,33 +65,41 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 
-  INSERT OR IGNORE INTO categories (name, icon, color) VALUES
-    ('Produce', '🥦', '#22c55e'),
-    ('Dairy', '🧀', '#eab308'),
-    ('Meat & Fish', '🥩', '#ef4444'),
-    ('Leftovers', '🍱', '#f97316'),
-    ('Frozen', '🧊', '#38bdf8'),
-    ('Pantry Staples', '🫙', '#a78bfa'),
-    ('Spices & Herbs', '🌿', '#10b981'),
-    ('Drinks', '🥤', '#06b6d4'),
-    ('Snacks', '🍿', '#f59e0b'),
-    ('Condiments', '🫙', '#84cc16');
-
-  INSERT OR IGNORE INTO locations (name, icon, color, sort_order) VALUES
-    ('Fridge', '❄️', '#1e5f8a', 0),
-    ('Freezer', '🧊', '#5b8cba', 1),
-    ('Pantry', '🫙', '#c85a2a', 2),
-    ('Spice Rack', '🌿', '#10b981', 3),
-    ('Fruit Bowl', '🍎', '#f59e0b', 4);
 `);
+
+// Seed defaults only on very first run (empty tables) — won't re-add deleted items
+if (db.prepare('SELECT COUNT(*) as c FROM categories').get().c === 0) {
+  db.prepare("INSERT INTO categories (name,icon,color) VALUES (?,?,?)").run('Produce','🥦','#22c55e');
+  db.prepare("INSERT INTO categories (name,icon,color) VALUES (?,?,?)").run('Dairy','🧀','#eab308');
+  db.prepare("INSERT INTO categories (name,icon,color) VALUES (?,?,?)").run('Meat & Fish','🥩','#ef4444');
+  db.prepare("INSERT INTO categories (name,icon,color) VALUES (?,?,?)").run('Leftovers','🍱','#f97316');
+  db.prepare("INSERT INTO categories (name,icon,color) VALUES (?,?,?)").run('Frozen','🧊','#38bdf8');
+  db.prepare("INSERT INTO categories (name,icon,color) VALUES (?,?,?)").run('Pantry Staples','🫙','#a78bfa');
+  db.prepare("INSERT INTO categories (name,icon,color) VALUES (?,?,?)").run('Spices & Herbs','🌿','#10b981');
+  db.prepare("INSERT INTO categories (name,icon,color) VALUES (?,?,?)").run('Drinks','🥤','#06b6d4');
+  db.prepare("INSERT INTO categories (name,icon,color) VALUES (?,?,?)").run('Snacks','🍿','#f59e0b');
+  db.prepare("INSERT INTO categories (name,icon,color) VALUES (?,?,?)").run('Condiments','🫙','#84cc16');
+}
+if (db.prepare('SELECT COUNT(*) as c FROM locations').get().c === 0) {
+  db.prepare("INSERT INTO locations (name,icon,color,sort_order) VALUES (?,?,?,?)").run('Fridge','❄️','#1e5f8a',0);
+  db.prepare("INSERT INTO locations (name,icon,color,sort_order) VALUES (?,?,?,?)").run('Freezer','🧊','#5b8cba',1);
+  db.prepare("INSERT INTO locations (name,icon,color,sort_order) VALUES (?,?,?,?)").run('Pantry','🫙','#c85a2a',2);
+  db.prepare("INSERT INTO locations (name,icon,color,sort_order) VALUES (?,?,?,?)").run('Spice Rack','🌿','#10b981',3);
+  db.prepare("INSERT INTO locations (name,icon,color,sort_order) VALUES (?,?,?,?)").run('Fruit Bowl','🍎','#f59e0b',4);
+}
 
 // Migrate: add quantity_num column to sub_entries if missing
 try {
   const seCols = db.prepare("PRAGMA table_info(sub_entries)").all().map(c => c.name);
-  if (!seCols.includes('quantity_num')) {
-    db.exec('ALTER TABLE sub_entries ADD COLUMN quantity_num REAL');
-  }
-} catch (e) { /* already exists */ }
+  if (!seCols.includes('quantity_num')) db.exec('ALTER TABLE sub_entries ADD COLUMN quantity_num REAL');
+} catch (e) {}
+
+// Migrate: add quantity columns to items if missing
+try {
+  const iCols = db.prepare("PRAGMA table_info(items)").all().map(c => c.name);
+  if (!iCols.includes('quantity')) db.exec('ALTER TABLE items ADD COLUMN quantity TEXT');
+  if (!iCols.includes('quantity_num')) db.exec('ALTER TABLE items ADD COLUMN quantity_num REAL');
+} catch (e) {}
 
 // Migrate old text-based location column if upgrading from v1
 try {
@@ -279,9 +289,9 @@ app.get('/api/items/:id', (req, res) => {
 });
 
 app.post('/api/items', (req, res) => {
-  const { name, category_id, location_id, notes, date_added } = req.body;
-  const result = db.prepare('INSERT INTO items (name, category_id, location_id, notes, date_added) VALUES (?, ?, ?, ?, ?)').run(
-    name, category_id || null, location_id || null, notes || '', date_added || new Date().toISOString().split('T')[0]
+  const { name, category_id, location_id, notes, quantity, quantity_num, date_added } = req.body;
+  const result = db.prepare('INSERT INTO items (name, category_id, location_id, notes, quantity, quantity_num, date_added) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+    name, category_id || null, location_id || null, notes || '', quantity || '', quantity_num != null ? parseFloat(quantity_num) : null, date_added || new Date().toISOString().split('T')[0]
   );
   const item = db.prepare(ITEM_SELECT + ' WHERE i.id = ? GROUP BY i.id').get(result.lastInsertRowid);
   item.sub_entries = [];
@@ -289,9 +299,9 @@ app.post('/api/items', (req, res) => {
 });
 
 app.put('/api/items/:id', (req, res) => {
-  const { name, category_id, location_id, notes, date_added } = req.body;
-  db.prepare('UPDATE items SET name=?, category_id=?, location_id=?, notes=?, date_added=? WHERE id=?').run(
-    name, category_id || null, location_id || null, notes || '', date_added, req.params.id
+  const { name, category_id, location_id, notes, quantity, quantity_num, date_added } = req.body;
+  db.prepare('UPDATE items SET name=?, category_id=?, location_id=?, notes=?, quantity=?, quantity_num=?, date_added=? WHERE id=?').run(
+    name, category_id || null, location_id || null, notes || '', quantity || '', quantity_num != null ? parseFloat(quantity_num) : null, date_added, req.params.id
   );
   const item = db.prepare(ITEM_SELECT + ' WHERE i.id = ? GROUP BY i.id').get(req.params.id);
   item.sub_entries = db.prepare('SELECT * FROM sub_entries WHERE item_id = ? ORDER BY date_added DESC').all(req.params.id);
@@ -386,8 +396,8 @@ app.post('/api/restore', (req, res) => {
       for (const l of (backup.locations || [])) insLoc.run(l.id,l.name,l.icon,l.color,l.sort_order,l.created_at);
       const insCat = db.prepare('INSERT INTO categories (id,name,icon,color,created_at) VALUES (?,?,?,?,?)');
       for (const c of (backup.categories || [])) insCat.run(c.id,c.name,c.icon,c.color,c.created_at);
-      const insItem = db.prepare('INSERT INTO items (id,name,category_id,location_id,notes,date_added,created_at) VALUES (?,?,?,?,?,?,?)');
-      for (const i of (backup.items || [])) insItem.run(i.id,i.name,i.category_id,i.location_id,i.notes,i.date_added,i.created_at);
+      const insItem = db.prepare('INSERT INTO items (id,name,category_id,location_id,notes,quantity,quantity_num,date_added,created_at) VALUES (?,?,?,?,?,?,?,?,?)');
+      for (const i of (backup.items || [])) insItem.run(i.id,i.name,i.category_id,i.location_id,i.notes,i.quantity||'',i.quantity_num??null,i.date_added,i.created_at);
       const insSub = db.prepare('INSERT INTO sub_entries (id,item_id,description,quantity,quantity_num,date_added,created_at) VALUES (?,?,?,?,?,?,?)');
       for (const s of (backup.sub_entries || [])) insSub.run(s.id,s.item_id,s.description,s.quantity,s.quantity_num??null,s.date_added,s.created_at);
       const insPreset = db.prepare('INSERT INTO tab_presets (id,name,tabs,is_default,created_at) VALUES (?,?,?,?,?)');

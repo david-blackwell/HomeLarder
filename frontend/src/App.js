@@ -182,21 +182,20 @@ function Modal({ title, onClose, children, wide }) {
     animation: 'fadeIn 0.2s ease', border: '1px solid var(--border)',
   };
 
-  return (
+  return ReactDOM.createPortal(
     <div onClick={isMobile ? undefined : onClose}
       style={{ position: 'fixed', inset: 0, background: isMobile ? 'transparent' : 'var(--overlay)', backdropFilter: isMobile ? 'none' : 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent: 'center', padding: isMobile ? 0 : 16 }}>
       <div onClick={e => e.stopPropagation()} style={sheetStyle}>
-        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0, background: 'var(--bg-card)', ...(isMobile ? {} : { position: 'sticky', top: 0, zIndex: 1, borderRadius: '16px 16px 0 0' }) }}>
           <h2 style={{ fontFamily: 'Fraunces, Georgia, serif', fontWeight: 600, fontSize: isMobile ? 18 : 20 }}>{title}</h2>
           <button onClick={onClose} style={{ width: 36, height: 36, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-subtle)', color: 'var(--text-muted)', fontSize: 20, flexShrink: 0 }}>×</button>
         </div>
-        {/* Body */}
         <div style={{ padding: '18px 20px 32px', ...(isMobile ? { flex: 1, overflowY: 'auto' } : {}) }}>
           {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -249,11 +248,13 @@ function SimilarSuggestions({ items, onSelect }) {
 }
 
 // ── AddItemModal ──────────────────────────────────────────────────────────
-function AddItemModal({ categories, locations, onClose, onSaved, prefillItem, defaultLocationId }) {
+function AddItemModal({ categories, locations, onClose, onSaved, prefillItem, defaultLocationId, defaultCategoryId }) {
   const [name, setName] = useState('');
-  const [categoryId, setCategoryId] = useState('');
+  const [categoryId, setCategoryId] = useState(String(defaultCategoryId || ''));
   const [locationId, setLocationId] = useState(String(defaultLocationId || ''));
   const [notes, setNotes] = useState('');
+  const [itemQtyNum, setItemQtyNum] = useState(null);
+  const [itemQtyText, setItemQtyText] = useState('');
   const [dateAdded, setDateAdded] = useState(TODAY);
   const [similar, setSimilar] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -284,12 +285,53 @@ function AddItemModal({ categories, locations, onClose, onSaved, prefillItem, de
         await api(`/api/items/${targetItem.id}/sub-entries`, { method: 'POST', body: { description: subDesc, quantity: subQtyText, quantity_num: subQtyNum, date_added: dateAdded } });
       } else {
         if (!name.trim()) { setError('Name is required'); setSaving(false); return; }
-        await api('/api/items', { method: 'POST', body: { name: name.trim(), category_id: categoryId || null, location_id: locationId || null, notes, date_added: dateAdded } });
+        await api('/api/items', { method: 'POST', body: { name: name.trim(), category_id: categoryId || null, location_id: locationId || null, notes, quantity: itemQtyText, quantity_num: itemQtyNum, date_added: dateAdded } });
       }
       onSaved(); onClose();
     } catch (e) { setError(e.message); }
     setSaving(false);
   };
+
+  const locSelectRef = useRef(null);
+  const catSelectRef = useRef(null);
+
+  // Letter keys jump to matching location/category; Enter submits
+  useEffect(() => {
+    const handler = e => {
+      if (e.key === 'Enter' && !e.shiftKey && document.activeElement?.tagName !== 'BUTTON' && document.activeElement?.tagName !== 'SELECT') {
+        e.preventDefault();
+        handleSave();
+        return;
+      }
+      // Only intercept plain letter keys not in an input/textarea
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (!/^[a-zA-Z]$/.test(e.key)) return;
+      const letter = e.key.toLowerCase();
+
+      // Try location select first — find next option starting with letter after current
+      const locSel = locSelectRef.current;
+      if (locSel) {
+        const opts = Array.from(locSel.options);
+        const curIdx = locSel.selectedIndex;
+        // Find options after current that start with letter, then wrap around
+        const after = opts.slice(curIdx + 1).concat(opts.slice(0, curIdx + 1));
+        const match = after.find(o => o.text.toLowerCase().replace(/^[^\w]*/, '').startsWith(letter));
+        if (match) { setLocationId(match.value); return; }
+      }
+      // Then category select
+      const catSel = catSelectRef.current;
+      if (catSel) {
+        const opts = Array.from(catSel.options);
+        const curIdx = catSel.selectedIndex;
+        const after = opts.slice(curIdx + 1).concat(opts.slice(0, curIdx + 1));
+        const match = after.find(o => o.text.toLowerCase().replace(/^[^\w]*/, '').startsWith(letter));
+        if (match) { setCategoryId(match.value); return; }
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [locationId, categoryId]); // eslint-disable-line
 
   return (
     <Modal title={mode === 'sub-entry' ? `Add to: ${targetItem?.name}` : 'Add Item'} onClose={onClose}>
@@ -318,13 +360,13 @@ function AddItemModal({ categories, locations, onClose, onSaved, prefillItem, de
           <SimilarSuggestions items={similar} onSelect={item => { setTargetItem(item); setMode('sub-entry'); setSimilar([]); }} />
           <div style={{ display: 'flex', gap: 10 }}>
             <Field label="Location" half>
-              <select style={inputStyle} value={locationId} onChange={e => setLocationId(e.target.value)} onFocus={focusInput} onBlur={blurInput}>
+              <select ref={locSelectRef} style={inputStyle} value={locationId} onChange={e => setLocationId(e.target.value)} onFocus={focusInput} onBlur={blurInput}>
                 <option value="">— None —</option>
                 {locations.map(l => <option key={l.id} value={l.id}>{l.icon} {l.name}</option>)}
               </select>
             </Field>
             <Field label="Category" half>
-              <select style={inputStyle} value={categoryId} onChange={e => setCategoryId(e.target.value)} onFocus={focusInput} onBlur={blurInput}>
+              <select ref={catSelectRef} style={inputStyle} value={categoryId} onChange={e => setCategoryId(e.target.value)} onFocus={focusInput} onBlur={blurInput}>
                 <option value="">— None —</option>
                 {categories.map(c => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
               </select>
@@ -332,6 +374,9 @@ function AddItemModal({ categories, locations, onClose, onSaved, prefillItem, de
           </div>
           <Field label="Notes (optional)">
             <input style={inputStyle} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Any notes…" onFocus={focusInput} onBlur={blurInput} />
+          </Field>
+          <Field label="Quantity (optional)" hint="e.g. 1x serve, 2 portions — use sub-entries for multiple cuts/portions">
+            <QuantityInput quantityNum={itemQtyNum} quantityText={itemQtyText} onChangeNum={setItemQtyNum} onChangeText={setItemQtyText} />
           </Field>
         </>
       )}
@@ -355,6 +400,8 @@ function EditItemModal({ item, categories, locations, onClose, onSaved }) {
   const [categoryId, setCategoryId] = useState(String(item.category_id || ''));
   const [locationId, setLocationId] = useState(String(item.location_id || ''));
   const [notes, setNotes] = useState(item.notes || '');
+  const [itemQtyNum, setItemQtyNum] = useState(item.quantity_num ?? null);
+  const [itemQtyText, setItemQtyText] = useState(item.quantity || '');
   const [dateAdded, setDateAdded] = useState(item.date_added);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -362,7 +409,7 @@ function EditItemModal({ item, categories, locations, onClose, onSaved }) {
   const handleSave = async () => {
     setSaving(true); setError('');
     try {
-      await api(`/api/items/${item.id}`, { method: 'PUT', body: { name, category_id: categoryId || null, location_id: locationId || null, notes, date_added: dateAdded } });
+      await api(`/api/items/${item.id}`, { method: 'PUT', body: { name, category_id: categoryId || null, location_id: locationId || null, notes, quantity: itemQtyText, quantity_num: itemQtyNum, date_added: dateAdded } });
       onSaved(); onClose();
     } catch (e) { setError(e.message); }
     setSaving(false);
@@ -387,8 +434,11 @@ function EditItemModal({ item, categories, locations, onClose, onSaved }) {
           </select>
         </Field>
       </div>
-      <Field label="Notes">
+      <Field label="Notes (optional)">
         <input style={inputStyle} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Any notes…" onFocus={focusInput} onBlur={blurInput} />
+      </Field>
+      <Field label="Quantity (optional)" hint="e.g. 1x serve, 2 portions">
+        <QuantityInput quantityNum={itemQtyNum} quantityText={itemQtyText} onChangeNum={setItemQtyNum} onChangeText={setItemQtyText} />
       </Field>
       <Field label="Date added">
         <input type="date" style={inputStyle} value={dateAdded} onChange={e => setDateAdded(e.target.value)} />
@@ -450,17 +500,28 @@ function SubEntryRow({ entry, onDelete, onUpdate, onStepNum, compact }) {
 
   if (editing) {
     return (
-      <div style={{ padding: '8px 10px', background: 'var(--bg)', borderRadius: 8, marginBottom: 6, border: '1.5px solid var(--accent)' }}>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-          <input style={{ ...inputStyle, ...IS.sm, flex: 2 }} value={desc} onChange={e => setDesc(e.target.value)} onFocus={focusInput} onBlur={blurInput} />
-          <QuantityInput quantityNum={qtyNum} quantityText={qtyText} onChangeNum={setQtyNum} onChangeText={setQtyText} small />
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input type="date" style={{ ...inputStyle, ...IS.sm, flex: 1 }} value={date} onChange={e => setDate(e.target.value)} />
-          <button onClick={handleSave} disabled={saving} style={{ padding: '6px 14px', borderRadius: 6, background: 'var(--accent)', color: '#fff', fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap' }}>{saving ? '…' : 'Save'}</button>
-          <button onClick={() => setEditing(false)} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 13 }}>✕</button>
-        </div>
-      </div>
+      <>
+        <Modal title="Edit Sub-entry" onClose={() => setEditing(false)}>
+          <Field label="Description">
+            <input style={inputStyle} value={desc} onChange={e => setDesc(e.target.value)} autoFocus onFocus={focusInput} onBlur={blurInput} />
+          </Field>
+          <Field label="Quantity">
+            <QuantityInput quantityNum={qtyNum} quantityText={qtyText} onChangeNum={setQtyNum} onChangeText={setQtyText} />
+          </Field>
+          <Field label="Date added">
+            <input type="date" style={inputStyle} value={date} onChange={e => setDate(e.target.value)} />
+          </Field>
+          <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+            <button onClick={() => setEditing(false)} style={{ flex: 1, padding: '11px', borderRadius: 9, border: '1.5px solid var(--border)', color: 'var(--text-muted)', background: 'var(--bg-subtle)', fontWeight: 500 }}>Cancel</button>
+            <button onClick={handleSave} disabled={saving} style={{ flex: 2, padding: '11px', borderRadius: 9, background: 'var(--accent)', color: '#fff', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              {saving && <Spinner />} Save Changes
+            </button>
+          </div>
+        </Modal>
+        {compact
+          ? <tr><td colSpan={5} style={{ padding: 0 }} /></tr>
+          : <div style={{ marginBottom: 5 }} />}
+      </>
     );
   }
 
@@ -569,6 +630,16 @@ function ItemCard({ item, categories, locations, onRefresh, onAddSubEntry, alway
     const yes = await confirm({ message: `Delete "${item.name}"?`, detail: 'This will remove the item and all its sub-entries.', confirmLabel: 'Delete' });
     if (yes) { await api(`/api/items/${item.id}`, { method: 'DELETE' }); onRefresh(); }
   };
+  const handleStepItemNum = async delta => {
+    const current = item.quantity_num ?? 0;
+    const next = Math.max(0, current + delta);
+    if (next === 0) {
+      const yes = await confirm({ message: `Delete "${item.name}"?`, detail: 'Quantity reached 0.', confirmLabel: 'Delete' });
+      if (yes) { await api(`/api/items/${item.id}`, { method: 'DELETE' }); onRefresh(); return; }
+    }
+    await api(`/api/items/${item.id}`, { method: 'PUT', body: { name: item.name, category_id: item.category_id, location_id: item.location_id, notes: item.notes, quantity: item.quantity, quantity_num: next, date_added: item.date_added } });
+    onRefresh();
+  };
   const handleStepNum = async (entry, newNum) => {
     if (newNum === 0) {
       const yes = await confirm({ message: `Delete "${entry.description}"?`, detail: 'Quantity reached 0.', confirmLabel: 'Delete' });
@@ -603,10 +674,23 @@ function ItemCard({ item, categories, locations, onRefresh, onAddSubEntry, alway
                   ? <Badge icon={item.location_icon || ''} name={item.location_name} color={item.location_color || '#6366f1'} />
                   : <span style={{ fontSize: 11, color: 'var(--text-light)', fontStyle: 'italic' }}>No location</span>}
               </div>
-              <div style={{ marginTop: 5, fontSize: 12, color: 'var(--text-light)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                <span>Added {item.date_added}</span>
-                {item.notes && <span style={{ fontStyle: 'italic', color: 'var(--text-muted)' }}>· "{item.notes}"</span>}
-              </div>
+              <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-light)' }}>Added {item.date_added}</div>
+              {(item.notes || item.quantity || item.quantity_num != null) && (
+                <div style={{ marginTop: 4, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {item.notes && <span style={{ fontSize: 13, color: 'var(--text-muted)', background: 'var(--bg-subtle)', borderRadius: 6, padding: '3px 8px' }}>{item.notes}</span>}
+                  {item.quantity_num != null ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 0, border: '1.5px solid var(--accent)', borderRadius: 7, overflow: 'hidden', background: 'var(--accent-light)' }}>
+                      <button onClick={() => handleStepItemNum(-1)} style={{ padding: '2px 8px', fontSize: 15, color: 'var(--accent)', background: 'transparent', lineHeight: 1 }}>−</button>
+                      <span style={{ padding: '2px 6px', fontSize: 13, fontWeight: 600, color: 'var(--accent)', background: 'transparent', minWidth: 20, textAlign: 'center' }}>
+                        {item.quantity_num}{item.quantity ? ' ' + item.quantity : ''}
+                      </span>
+                      <button onClick={() => handleStepItemNum(1)} style={{ padding: '2px 8px', fontSize: 15, color: 'var(--accent)', background: 'transparent', lineHeight: 1 }}>+</button>
+                    </div>
+                  ) : item.quantity ? (
+                    <span style={{ fontSize: 13, color: 'var(--accent)', background: 'var(--accent-light)', borderRadius: 6, padding: '3px 8px', fontWeight: 500 }}>{item.quantity}</span>
+                  ) : null}
+                </div>
+              )}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -674,6 +758,16 @@ function ItemRow({ item, categories, locations, onRefresh, onAddSubEntry }) {
     const yes = await confirm({ message: `Delete "${item.name}"?`, detail: 'This will remove the item and all its sub-entries.', confirmLabel: 'Delete' });
     if (yes) { await api(`/api/items/${item.id}`, { method: 'DELETE' }); onRefresh(); }
   };
+  const handleStepItemNum = async delta => {
+    const current = item.quantity_num ?? 0;
+    const next = Math.max(0, current + delta);
+    if (next === 0) {
+      const yes = await confirm({ message: `Delete "${item.name}"?`, detail: 'Quantity reached 0.', confirmLabel: 'Delete' });
+      if (yes) { await api(`/api/items/${item.id}`, { method: 'DELETE' }); onRefresh(); return; }
+    }
+    await api(`/api/items/${item.id}`, { method: 'PUT', body: { name: item.name, category_id: item.category_id, location_id: item.location_id, notes: item.notes, quantity: item.quantity, quantity_num: next, date_added: item.date_added } });
+    onRefresh();
+  };
   const handleStepNum = async (entry, newNum) => {
     if (newNum === 0) {
       const yes = await confirm({ message: `Delete "${entry.description}"?`, detail: 'Quantity reached 0.', confirmLabel: 'Delete' });
@@ -703,7 +797,18 @@ function ItemRow({ item, categories, locations, onRefresh, onAddSubEntry }) {
           <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', flex: '1 1 auto' }}>
             {item.category_name && <Badge icon="" name={item.category_name} color={item.category_color || '#6366f1'} />}
             {item.location_name && <Badge icon={item.location_icon || ''} name={item.location_name} color={item.location_color || '#6366f1'} />}
-            {item.notes && <span style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>"{item.notes}"</span>}
+            {item.notes && <span style={{ fontSize: 13, color: 'var(--text-muted)', background: 'var(--bg-subtle)', borderRadius: 6, padding: '2px 8px' }}>{item.notes}</span>}
+            {item.quantity_num != null ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 0, border: '1.5px solid var(--accent)', borderRadius: 7, overflow: 'hidden', background: 'var(--accent-light)' }}>
+                <button onClick={() => handleStepItemNum(-1)} style={{ padding: '1px 7px', fontSize: 14, color: 'var(--accent)', background: 'transparent', lineHeight: 1 }}>−</button>
+                <span style={{ padding: '1px 6px', fontSize: 12, fontWeight: 600, color: 'var(--accent)', minWidth: 18, textAlign: 'center' }}>
+                  {item.quantity_num}{item.quantity ? ' ' + item.quantity : ''}
+                </span>
+                <button onClick={() => handleStepItemNum(1)} style={{ padding: '1px 7px', fontSize: 14, color: 'var(--accent)', background: 'transparent', lineHeight: 1 }}>+</button>
+              </div>
+            ) : item.quantity ? (
+              <span style={{ fontSize: 13, color: 'var(--accent)', background: 'var(--accent-light)', borderRadius: 6, padding: '2px 8px', fontWeight: 500 }}>{item.quantity}</span>
+            ) : null}
           </div>
           <div style={{ display: 'flex', gap: 5, flexShrink: 0, marginLeft: 'auto', flexWrap: 'wrap' }}>
             <button onClick={() => onAddSubEntry(item)} style={{ padding: '4px 9px', borderRadius: 6, background: 'var(--green-light)', color: 'var(--green)', fontWeight: 600, fontSize: 12, border: '1px solid var(--green)', whiteSpace: 'nowrap' }}>+ Entry</button>
@@ -1140,6 +1245,7 @@ function LocationManager({ locations, onRefresh, onClose }) {
           )}
         </div>
       ))}
+      {ConfirmUI}
     </Modal>
   );
 }
@@ -1319,6 +1425,7 @@ export default function App() {
   const unassignedCount = stats?.unassigned_count || 0;
   const totalCount = stats?.total_items || 0;
   const defaultLocId = activeTab?.startsWith('loc:') ? parseInt(activeTab.slice(4)) : null;
+  const defaultCatId = activeTab?.startsWith('cat:') ? parseInt(activeTab.slice(4)) : null;
 
   const tabItems = pinnedTabs.map(key => {
     if (key.startsWith('loc:')) {
@@ -1441,7 +1548,7 @@ export default function App() {
       </main>
 
       {/* ── Modals ── */}
-      {showAdd && <AddItemModal categories={categories} locations={locations} onClose={() => { setShowAdd(false); setAddSubTarget(null); }} onSaved={handleRefresh} prefillItem={addSubTarget} defaultLocationId={defaultLocId} />}
+      {showAdd && <AddItemModal categories={categories} locations={locations} onClose={() => { setShowAdd(false); setAddSubTarget(null); }} onSaved={handleRefresh} prefillItem={addSubTarget} defaultLocationId={defaultLocId} defaultCategoryId={defaultCatId} />}
       {showLocs && <LocationManager locations={locations} onRefresh={loadAll} onClose={() => setShowLocs(false)} />}
       {showCats && <CategoryManager categories={categories} onRefresh={loadAll} onClose={() => setShowCats(false)} />}
       {showPresets && <TabPresetsModal locations={locations} categories={categories} presets={presets} onRefresh={refreshPresets} onClose={() => setShowPresets(false)} onActivate={tabs => setPinnedTabs(tabs)} />}
