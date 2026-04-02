@@ -255,7 +255,7 @@ app.get('/api/items', (req, res) => {
   let query = ITEM_SELECT + ' WHERE 1=1';
   const params = [];
   if (location_id === 'unassigned') {
-    query += ' AND i.location_id IS NULL';
+    query += ' AND i.location_id IS NULL AND i.category_id IS NULL';
   } else if (location_id) {
     query += ' AND i.location_id = ?'; params.push(location_id);
   }
@@ -352,7 +352,7 @@ app.get('/api/stats', (req, res) => {
       FROM categories c LEFT JOIN items i ON i.category_id = c.id
       GROUP BY c.id ORDER BY c.name ASC
     `).all(),
-    unassigned_count: db.prepare('SELECT COUNT(*) as c FROM items WHERE location_id IS NULL').get().c,
+    unassigned_count: db.prepare('SELECT COUNT(*) as c FROM items WHERE location_id IS NULL AND category_id IS NULL').get().c,
   });
 });
 
