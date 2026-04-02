@@ -105,6 +105,139 @@ function fmtQty(num, text) {
   return null;
 }
 
+// ── EmojiSelect ───────────────────────────────────────────────────────────
+// Custom select that shows emoji + name in a styled dropdown.
+// Keyboard nav: each letter press jumps to the next matching item (fresh match,
+// no accumulation), cycling from current position. Arrow keys, Enter, Escape, Tab all work.
+function EmojiSelect({ items, value, onChange, placeholder = '— None —', half }) {
+  const [open, setOpen] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const containerRef = useRef(null);
+  const listRef = useRef(null);
+
+  const selected = items.find(i => String(i.id) === String(value)) || null;
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = e => { if (!containerRef.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  // Scroll highlighted item into view when open
+  useEffect(() => {
+    if (!open || !listRef.current) return;
+    const highlighted = listRef.current.querySelector('[data-highlighted="true"]');
+    if (highlighted) highlighted.scrollIntoView({ block: 'nearest' });
+  }, [open, value]);
+
+  const selectItem = (id) => { onChange(String(id)); setOpen(false); containerRef.current?.focus(); };
+  const clearItem = () => { onChange(''); setOpen(false); containerRef.current?.focus(); };
+
+  const handleKeyDown = e => {
+    if (e.key === 'Escape') { setOpen(false); return; }
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(o => !o); return; }
+    if (e.key === 'Tab') { setOpen(false); return; }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!open) { setOpen(true); return; }
+      const idx = items.findIndex(i => String(i.id) === String(value));
+      const next = items[idx + 1] || items[0];
+      onChange(String(next.id));
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!open) { setOpen(true); return; }
+      const idx = items.findIndex(i => String(i.id) === String(value));
+      const prev = items[idx - 1] || items[items.length - 1];
+      onChange(String(prev.id));
+      return;
+    }
+
+    // Letter key: find next item whose name starts with letter, cycling from current
+    if (/^[a-zA-Z]$/.test(e.key)) {
+      e.preventDefault();
+      if (!open) setOpen(true);
+      const letter = e.key.toLowerCase();
+      const curIdx = items.findIndex(i => String(i.id) === String(value));
+      const after = [...items.slice(curIdx + 1), ...items.slice(0, curIdx + 1)];
+      const match = after.find(i => i.name.toLowerCase().startsWith(letter));
+      if (match) onChange(String(match.id));
+    }
+  };
+
+  const triggerStyle = {
+    ...IS.base,
+    display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer',
+    userSelect: 'none', position: 'relative',
+    borderColor: focused ? 'var(--accent)' : 'var(--border)',
+  };
+
+  return (
+    <div ref={containerRef} tabIndex={0} onKeyDown={handleKeyDown}
+      onFocus={() => setFocused(true)} onBlur={e => { if (!containerRef.current?.contains(e.relatedTarget)) { setFocused(false); setOpen(false); } }}
+      style={{ position: 'relative', outline: 'none', ...(half ? { flex: 1, minWidth: 0 } : { width: '100%' }) }}>
+      {/* Trigger */}
+      <div onClick={() => setOpen(o => !o)} style={triggerStyle}>
+        {selected ? (
+          <>
+            <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0 }}>{selected.icon}</span>
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selected.name}</span>
+          </>
+        ) : (
+          <span style={{ flex: 1, color: 'var(--text-muted)' }}>{placeholder}</span>
+        )}
+        <span style={{ fontSize: 10, color: 'var(--text-light)', flexShrink: 0, transition: 'transform 0.15s', transform: open ? 'rotate(180deg)' : 'none' }}>▼</span>
+      </div>
+
+      {/* Dropdown */}
+      {open && (
+        <div ref={listRef} style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 3000,
+          background: 'var(--bg-card)', border: '1.5px solid var(--accent)', borderRadius: 9,
+          boxShadow: 'var(--shadow-lg)', maxHeight: 320, overflowY: 'auto',
+          animation: 'fadeIn 0.12s ease',
+        }}>
+          {/* None option */}
+          <div onClick={clearItem} data-highlighted={!value}
+            style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', cursor: 'pointer', fontSize: 13, // padding: '5px 10px' is tighter
+              color: !value ? 'var(--accent)' : 'var(--text-muted)',
+              background: !value ? 'var(--accent-light)' : 'transparent', fontStyle: 'italic',
+              borderBottom: '1px solid var(--border)',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-subtle)'}
+            onMouseLeave={e => e.currentTarget.style.background = !value ? 'var(--accent-light)' : 'transparent'}>
+            {placeholder}
+          </div>
+          {items.map(item => {
+            const isSelected = String(item.id) === String(value);
+            return (
+              <div key={item.id} onClick={() => selectItem(item.id)} data-highlighted={isSelected}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', cursor: 'pointer',
+                  background: isSelected ? 'var(--accent-light)' : 'transparent',
+                  color: isSelected ? 'var(--accent)' : 'var(--text)',
+                  fontWeight: isSelected ? 600 : 400,
+                }}
+                onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'var(--bg-subtle)'; }}
+                onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}>
+                <span style={{ fontSize: 18, lineHeight: 1, flexShrink: 0 }}>{item.icon}</span> 
+                <span style={{ flex: 1, fontSize: 14 }}>{item.name}</span> 
+                {isSelected && <span style={{ fontSize: 12, color: 'var(--accent)' }}>✓</span>}
+              </div>
+			  // in the above spans
+			  // emoji size -- item.icon, fontSize: 15 for smaller
+			  // text size -- item.name, fontSize: 13 for smaller
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── ConfirmDialog ─────────────────────────────────────────────────────────
 // A small in-app confirmation dialog — replaces window.confirm everywhere.
 // Usage: <ConfirmDialog message="..." onConfirm={fn} onCancel={fn} confirmLabel="Delete" danger />
@@ -237,7 +370,7 @@ function SimilarSuggestions({ items, onSelect }) {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {item.location_icon} {item.location_name || 'No location'} · {item.sub_entry_count} entr{item.sub_entry_count === 1 ? 'y' : 'ies'}
+              {item.location_name ? `${item.location_icon} ${item.location_name}` : item.category_name ? '' : 'Unassigned'} · {item.sub_entry_count} entr{item.sub_entry_count === 1 ? 'y' : 'ies'}
             </div>
           </div>
           <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600, flexShrink: 0 }}>+ Add →</span>
@@ -277,6 +410,7 @@ function AddItemModal({ categories, locations, onClose, onSaved, prefillItem, de
     }, 350);
   };
 
+
   const handleSave = async () => {
     setSaving(true); setError('');
     try {
@@ -292,46 +426,7 @@ function AddItemModal({ categories, locations, onClose, onSaved, prefillItem, de
     setSaving(false);
   };
 
-  const locSelectRef = useRef(null);
-  const catSelectRef = useRef(null);
 
-  // Letter keys jump to matching location/category; Enter submits
-  useEffect(() => {
-    const handler = e => {
-      if (e.key === 'Enter' && !e.shiftKey && document.activeElement?.tagName !== 'BUTTON' && document.activeElement?.tagName !== 'SELECT') {
-        e.preventDefault();
-        handleSave();
-        return;
-      }
-      // Only intercept plain letter keys not in an input/textarea
-      const tag = document.activeElement?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (!/^[a-zA-Z]$/.test(e.key)) return;
-      const letter = e.key.toLowerCase();
-
-      // Try location select first — find next option starting with letter after current
-      const locSel = locSelectRef.current;
-      if (locSel) {
-        const opts = Array.from(locSel.options);
-        const curIdx = locSel.selectedIndex;
-        // Find options after current that start with letter, then wrap around
-        const after = opts.slice(curIdx + 1).concat(opts.slice(0, curIdx + 1));
-        const match = after.find(o => o.text.toLowerCase().replace(/^[^\w]*/, '').startsWith(letter));
-        if (match) { setLocationId(match.value); return; }
-      }
-      // Then category select
-      const catSel = catSelectRef.current;
-      if (catSel) {
-        const opts = Array.from(catSel.options);
-        const curIdx = catSel.selectedIndex;
-        const after = opts.slice(curIdx + 1).concat(opts.slice(0, curIdx + 1));
-        const match = after.find(o => o.text.toLowerCase().replace(/^[^\w]*/, '').startsWith(letter));
-        if (match) { setCategoryId(match.value); return; }
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [locationId, categoryId]); // eslint-disable-line
 
   return (
     <Modal title={mode === 'sub-entry' ? `Add to: ${targetItem?.name}` : 'Add Item'} onClose={onClose}>
@@ -341,7 +436,7 @@ function AddItemModal({ categories, locations, onClose, onSaved, prefillItem, de
             <span style={{ fontSize: 24 }}>{targetItem.category_icon || '📦'}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600 }}>{targetItem.name}</div>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{targetItem.location_icon} {targetItem.location_name || 'No location'}</div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{targetItem.location_name ? `${targetItem.location_icon} ${targetItem.location_name}` : targetItem.category_name || 'No location/category'}</div>
             </div>
             <button onClick={() => { setMode('new'); setTargetItem(null); }} style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600, whiteSpace: 'nowrap' }}>Change</button>
           </div>
@@ -360,16 +455,10 @@ function AddItemModal({ categories, locations, onClose, onSaved, prefillItem, de
           <SimilarSuggestions items={similar} onSelect={item => { setTargetItem(item); setMode('sub-entry'); setSimilar([]); }} />
           <div style={{ display: 'flex', gap: 10 }}>
             <Field label="Location" half>
-              <select ref={locSelectRef} style={inputStyle} value={locationId} onChange={e => setLocationId(e.target.value)} onFocus={focusInput} onBlur={blurInput}>
-                <option value="">— None —</option>
-                {locations.map(l => <option key={l.id} value={l.id}>{l.icon} {l.name}</option>)}
-              </select>
+              <EmojiSelect items={locations} value={locationId} onChange={setLocationId} half />
             </Field>
             <Field label="Category" half>
-              <select ref={catSelectRef} style={inputStyle} value={categoryId} onChange={e => setCategoryId(e.target.value)} onFocus={focusInput} onBlur={blurInput}>
-                <option value="">— None —</option>
-                {categories.map(c => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
-              </select>
+              <EmojiSelect items={categories} value={categoryId} onChange={setCategoryId} half />
             </Field>
           </div>
           <Field label="Notes (optional)">
@@ -422,16 +511,10 @@ function EditItemModal({ item, categories, locations, onClose, onSaved }) {
       </Field>
       <div style={{ display: 'flex', gap: 10 }}>
         <Field label="Location" half>
-          <select style={inputStyle} value={locationId} onChange={e => setLocationId(e.target.value)}>
-            <option value="">— None —</option>
-            {locations.map(l => <option key={l.id} value={l.id}>{l.icon} {l.name}</option>)}
-          </select>
+          <EmojiSelect items={locations} value={locationId} onChange={setLocationId} half />
         </Field>
         <Field label="Category" half>
-          <select style={inputStyle} value={categoryId} onChange={e => setCategoryId(e.target.value)}>
-            <option value="">— None —</option>
-            {categories.map(c => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
-          </select>
+          <EmojiSelect items={categories} value={categoryId} onChange={setCategoryId} half />
         </Field>
       </div>
       <Field label="Notes (optional)">
@@ -672,7 +755,7 @@ function ItemCard({ item, categories, locations, onRefresh, onAddSubEntry, alway
                 {item.category_name && <Badge icon="" name={item.category_name} color={item.category_color || '#6366f1'} />}
                 {item.location_name
                   ? <Badge icon={item.location_icon || ''} name={item.location_name} color={item.location_color || '#6366f1'} />
-                  : <span style={{ fontSize: 11, color: 'var(--text-light)', fontStyle: 'italic' }}>No location</span>}
+                  : !item.category_name && <span style={{ fontSize: 11, color: 'var(--text-light)', fontStyle: 'italic' }}>Unassigned</span>}
               </div>
               <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-light)' }}>Added {item.date_added}</div>
               {(item.notes || item.quantity || item.quantity_num != null) && (
