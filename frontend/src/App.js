@@ -203,7 +203,7 @@ function EmojiSelect({ items, value, onChange, placeholder = '— None —', hal
         }}>
           {/* None option */}
           <div onClick={clearItem} data-highlighted={!value}
-            style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', cursor: 'pointer', fontSize: 13, // padding: '5px 10px' is tighter
+            style={{ display: 'flex', alignItems: 'center', padding: '5px 10px', cursor: 'pointer', fontSize: 13,
               color: !value ? 'var(--accent)' : 'var(--text-muted)',
               background: !value ? 'var(--accent-light)' : 'transparent', fontStyle: 'italic',
               borderBottom: '1px solid var(--border)',
@@ -223,13 +223,10 @@ function EmojiSelect({ items, value, onChange, placeholder = '— None —', hal
                 }}
                 onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'var(--bg-subtle)'; }}
                 onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}>
-                <span style={{ fontSize: 18, lineHeight: 1, flexShrink: 0 }}>{item.icon}</span> 
-                <span style={{ flex: 1, fontSize: 14 }}>{item.name}</span> 
+                <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>{item.icon}</span>
+                <span style={{ flex: 1, fontSize: 13 }}>{item.name}</span>
                 {isSelected && <span style={{ fontSize: 12, color: 'var(--accent)' }}>✓</span>}
               </div>
-			  // in the above spans
-			  // emoji size -- item.icon, fontSize: 15 for smaller
-			  // text size -- item.name, fontSize: 13 for smaller
             );
           })}
         </div>
@@ -677,7 +674,7 @@ function AddSubEntryInline({ itemId, onAdded }) {
 }
 
 // ── ItemCard ──────────────────────────────────────────────────────────────
-function ItemCard({ item, categories, locations, onRefresh, onAddSubEntry, alwaysExpanded }) {
+function ItemCard({ item, categories, locations, onRefresh, onUpdateItem, onAddSubEntry, alwaysExpanded }) {
   const [expanded, setExpanded] = useState(false);
   const [subEntries, setSubEntries] = useState([]);
   const [loadingSubs, setLoadingSubs] = useState(false);
@@ -698,14 +695,11 @@ function ItemCard({ item, categories, locations, onRefresh, onAddSubEntry, alway
     await api(`/api/sub-entries/${id}`, { method: 'DELETE' });
     const remaining = subEntries.filter(e => e.id !== id);
     setSubEntries(remaining);
+    // Update sub-entry count badge locally
+    onUpdateItem(item.id, { sub_entry_count: remaining.length });
     if (remaining.length === 0) {
       const yes = await confirm({ message: `Delete "${item.name}"?`, detail: 'All sub-entries have been removed.', confirmLabel: 'Delete item' });
-      if (yes) {
-        await api(`/api/items/${item.id}`, { method: 'DELETE' });
-      }
-      onRefresh();
-    } else {
-      onRefresh();
+      if (yes) { await api(`/api/items/${item.id}`, { method: 'DELETE' }); onRefresh(); }
     }
   };
   const handleUpdateSub = async (id, data) => { await api(`/api/sub-entries/${id}`, { method: 'PUT', body: data }); loadSubs(); };
@@ -721,7 +715,7 @@ function ItemCard({ item, categories, locations, onRefresh, onAddSubEntry, alway
       if (yes) { await api(`/api/items/${item.id}`, { method: 'DELETE' }); onRefresh(); return; }
     }
     await api(`/api/items/${item.id}`, { method: 'PUT', body: { name: item.name, category_id: item.category_id, location_id: item.location_id, notes: item.notes, quantity: item.quantity, quantity_num: next, date_added: item.date_added } });
-    onRefresh();
+    onUpdateItem(item.id, { quantity_num: next });
   };
   const handleStepNum = async (entry, newNum) => {
     if (newNum === 0) {
@@ -797,7 +791,7 @@ function ItemCard({ item, categories, locations, onRefresh, onAddSubEntry, alway
               <SubEntryRow key={e.id} entry={e} onDelete={handleDeleteSub} onUpdate={handleUpdateSub} onStepNum={handleStepNum} />
             ))}
             {showAddSub
-              ? <AddSubEntryInline itemId={item.id} onAdded={() => { loadSubs(); onRefresh(); setShowAddSub(false); }} />
+              ? <AddSubEntryInline itemId={item.id} onAdded={() => { loadSubs(); onUpdateItem(item.id, { sub_entry_count: (item.sub_entry_count || 0) + 1 }); setShowAddSub(false); }} />
               : <button onClick={() => setShowAddSub(true)} style={{ marginTop: 6, padding: '6px 14px', borderRadius: 7, border: '1.5px dashed var(--border-strong)', color: 'var(--text-muted)', fontSize: 13, width: '100%' }}>+ Add another sub-entry</button>}
           </div>
         )}
@@ -807,7 +801,7 @@ function ItemCard({ item, categories, locations, onRefresh, onAddSubEntry, alway
 }
 
 // ── ItemRow (horizontal/list view) ────────────────────────────────────────
-function ItemRow({ item, categories, locations, onRefresh, onAddSubEntry }) {
+function ItemRow({ item, categories, locations, onRefresh, onUpdateItem, onAddSubEntry }) {
   const [subEntries, setSubEntries] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [showAddSub, setShowAddSub] = useState(false);
@@ -826,14 +820,10 @@ function ItemRow({ item, categories, locations, onRefresh, onAddSubEntry }) {
     await api(`/api/sub-entries/${id}`, { method: 'DELETE' });
     const remaining = subEntries.filter(e => e.id !== id);
     setSubEntries(remaining);
+    onUpdateItem(item.id, { sub_entry_count: remaining.length });
     if (remaining.length === 0) {
       const yes = await confirm({ message: `Delete "${item.name}"?`, detail: 'All sub-entries have been removed.', confirmLabel: 'Delete item' });
-      if (yes) {
-        await api(`/api/items/${item.id}`, { method: 'DELETE' });
-      }
-      onRefresh();
-    } else {
-      onRefresh();
+      if (yes) { await api(`/api/items/${item.id}`, { method: 'DELETE' }); onRefresh(); }
     }
   };
   const handleUpdateSub = async (id, data) => { await api(`/api/sub-entries/${id}`, { method: 'PUT', body: data }); const r = await api(`/api/items/${item.id}/sub-entries`); setSubEntries(r); };
@@ -849,7 +839,7 @@ function ItemRow({ item, categories, locations, onRefresh, onAddSubEntry }) {
       if (yes) { await api(`/api/items/${item.id}`, { method: 'DELETE' }); onRefresh(); return; }
     }
     await api(`/api/items/${item.id}`, { method: 'PUT', body: { name: item.name, category_id: item.category_id, location_id: item.location_id, notes: item.notes, quantity: item.quantity, quantity_num: next, date_added: item.date_added } });
-    onRefresh();
+    onUpdateItem(item.id, { quantity_num: next });
   };
   const handleStepNum = async (entry, newNum) => {
     if (newNum === 0) {
@@ -919,7 +909,7 @@ function ItemRow({ item, categories, locations, onRefresh, onAddSubEntry }) {
         )}
         <div style={{ padding: '6px 14px 8px', background: 'var(--bg-subtle)' }}>
           {showAddSub
-            ? <AddSubEntryInline itemId={item.id} onAdded={async () => { const r = await api(`/api/items/${item.id}/sub-entries`); setSubEntries(r); onRefresh(); setShowAddSub(false); }} />
+            ? <AddSubEntryInline itemId={item.id} onAdded={async () => { const r = await api(`/api/items/${item.id}/sub-entries`); setSubEntries(r); onUpdateItem(item.id, { sub_entry_count: (item.sub_entry_count || 0) + 1 }); setShowAddSub(false); }} />
             : <button onClick={() => setShowAddSub(true)} style={{ padding: '4px 12px', borderRadius: 6, border: '1.5px dashed var(--border-strong)', color: 'var(--text-muted)', fontSize: 12 }}>+ Add sub-entry</button>}
         </div>
       </div>
@@ -1501,6 +1491,10 @@ export default function App() {
   useEffect(() => { loadItems(); }, [loadItems]);
 
   const handleRefresh = () => { loadAll(); loadItems(); };
+  // Update a single item's fields in local state without a full reload
+  const handleUpdateItem = (id, patch) => {
+    setItems(prev => prev.map(i => i.id === id ? { ...i, ...patch } : i));
+  };
   const refreshPresets = async () => { const ps = await api('/api/tab-presets'); setPresets(ps); };
 
   const locCounts = stats?.by_location?.reduce((acc, r) => ({ ...acc, [`loc:${r.id}`]: r.count }), {}) || {};
@@ -1622,10 +1616,10 @@ export default function App() {
             </div>
           ) : viewMode === 'card' ? (
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
-              {items.map(item => <ItemCard key={item.id} item={item} categories={categories} locations={locations} onRefresh={handleRefresh} onAddSubEntry={i => { setAddSubTarget(i); setShowAdd(true); }} alwaysExpanded={alwaysExpanded} />)}
+              {items.map(item => <ItemCard key={item.id} item={item} categories={categories} locations={locations} onRefresh={handleRefresh} onUpdateItem={handleUpdateItem} onAddSubEntry={i => { setAddSubTarget(i); setShowAdd(true); }} alwaysExpanded={alwaysExpanded} />)}
             </div>
           ) : (
-            <div>{items.map(item => <ItemRow key={item.id} item={item} categories={categories} locations={locations} onRefresh={handleRefresh} onAddSubEntry={i => { setAddSubTarget(i); setShowAdd(true); }} />)}</div>
+            <div>{items.map(item => <ItemRow key={item.id} item={item} categories={categories} locations={locations} onRefresh={handleRefresh} onUpdateItem={handleUpdateItem} onAddSubEntry={i => { setAddSubTarget(i); setShowAdd(true); }} />)}</div>
           )}
         </div>
       </main>
